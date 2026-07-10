@@ -88,7 +88,7 @@ class PLIVO(AppBase):
             jsondata = request.text
             try:
                 jsondata = json.loads(jsondata)
-            except:
+            except (ValueError, TypeError):
                 pass
 
             return {
@@ -111,17 +111,10 @@ class PLIVO(AppBase):
     def summarize_responses(self, one_response, summary):
         summary["results"].append(one_response)
 
-        # if ONE request fails, summary is marked as failed
         if not one_response["success"]:
             summary["success"] = False
 
-        # surface a non-2xx status code on the summary
-        try:
-            code = int(one_response["status"])
-        except (ValueError, TypeError):
-            code = 0
-        if not (200 <= code < 300):
-            summary["status"] = one_response["status"]
+        summary["status"] = one_response["status"]
 
         return summary
 
@@ -132,14 +125,9 @@ class PLIVO(AppBase):
         parsed_headers = self.splitheaders(headers)
         parsed_headers["User-Agent"] = "Shuffle Automation"
 
-        auth=None
-        if username or password:
-            # Shouldn't be used if authorization headers exist
-            if "Authorization" in parsed_headers:
-                #print("Found authorization - skipping username & pw")
-                pass
-            else:
-                auth = requests.auth.HTTPBasicAuth(username, password)
+        auth = None
+        if (username or password) and "Authorization" not in parsed_headers:
+            auth = requests.auth.HTTPBasicAuth(username, password)
 
         if not timeout:
             timeout = 5
@@ -153,7 +141,7 @@ class PLIVO(AppBase):
 
         summary = {
             "success": True,
-            "status": "200",
+            "status": None,
             "url": url,
             "results": []
         }
@@ -166,8 +154,11 @@ class PLIVO(AppBase):
 
         payload = {"src": From, "dst": dst, "text": body, "type": "sms"}
 
-        request = requests.post(url, headers=parsed_headers, auth=auth, json=payload, timeout=timeout)
-        response = self.prepare_response(request)
+        try:
+            request = requests.post(url, headers=parsed_headers, auth=auth, json=payload, timeout=timeout)
+            response = self.prepare_response(request)
+        except Exception as e:
+            response = {"success": False, "status": "XXX", "error": str(e)}
         summary = self.summarize_responses(response, summary)
 
         return json.dumps(summary)
@@ -179,8 +170,6 @@ def run(request):
     action = request.get_json()
     print(action)
     print(type(action))
-    authorization_key = action.get("authorization")
-    current_execution_id = action.get("execution_id")
 
     if action and "name" in action and "app_name" in action:
         PLIVO.run(action)
